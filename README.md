@@ -48,6 +48,71 @@ All implemented **without paid APIs or fine-tuning**.
 
 ---
 
+## 👥 Who Is This For?
+
+This project is designed for:
+
+- **Students** exploring advanced Retrieval-Augmented Generation (RAG) beyond basic LangChain demos  
+- **Researchers** interested in hallucination detection, self-correcting pipelines, and verification-first LLM systems  
+- **Engineers** who care more about *reliability and correctness* than raw fluency  
+- **Evaluators / Professors** assessing system design, architectural clarity, and reasoning depth  
+
+If you are looking for a chatbot demo — this is not it.  
+If you are interested in **building LLM systems that know when they might be wrong**, you’re in the right place.
+
+---
+
+## 🧩 System Overview (Formal Pipeline)
+
+```mermaid
+flowchart TD
+    Q[User Query q] --> I[Intent Classification I(q)]
+    I --> R[Adaptive Retrieval R_I(q)]
+    R --> C[Retrieved Context C_k]
+    C --> G[Initial RAG Generation]
+    G --> V[Verification & NLI Entailment]
+
+    V -->|Verified| A[Answer]
+    V -->|Partially Grounded| S[Self-Correction]
+    S --> V
+
+    V -->|Low Confidence| T[Threshold Gate]
+    T -->|Insufficient Evidence| X[Abstain]
+```
+
+---
+
+## ⚙️ How to Run
+> **Prerequisites:** Python 3.10+, Git, and API keys for the listed free-tier LLM providers.
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/Raunak-23/Self_Correcting_RAG.git
+cd <Self_Correcting_RAG>
+```
+
+### 2. Create and activate a virtual environment
+```bash
+python -m venv venv
+source venv/bin/activate        # Linux / macOS
+venv\\Scripts\\activate         # Windows
+```
+
+### 3. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Set up API keys
+Create a .env file and add your API keys as per .env.example
+
+### 5. Run the system
+```bash
+python main.py
+```
+This will execute the end-to-end pipeline:
+intent classification → adaptive retrieval → generation → verification → correction / abstention.
+
 ## 🧩 System Overview (Formal Pipeline)
 
 Let:
