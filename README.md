@@ -51,33 +51,25 @@ All implemented **without paid APIs or fine-tuning**.
 ## 🧩 System Overview (Formal Pipeline)
 
 Let:
-- \( q \) = user query  
-- \( I(q) \) = inferred intent  
-- \( \mathcal{C}_k \) = retrieved context  
-
+q       = user query
+I(q)    = inferred intent
+R_I(q)  = intent-specific retrieval policy
+C_k     = retrieved context (top-k chunks)
+G(.)    = generation function
+V(.)    = verification function
+ 
 The system executes:
 
-\[
-q \xrightarrow{I} I(q)
-\rightarrow \mathcal{R}_{I(q)}
-\rightarrow \mathcal{C}_k
-\rightarrow G(q, \mathcal{C}_k)
-\rightarrow V(\text{claims}, \mathcal{C}_k)
-\rightarrow
-\begin{cases}
-\text{Answer} & \text{if verified} \\
-\text{Correct} & \text{if salvageable} \\
-\text{Abstain} & \text{if unreliable}
-\end{cases}
-\]
+q → I(q) → R_{I(q)} → C_k → G(q, C_k) → V(claims, C_k)
+        ↳ Answer (if verified)
+        ↳ Correct (if salvageable)
+        ↳ Abstain (if unreliable)
 
 ---
 
 ## 1️⃣ Intent Classification — *High-Dimensional Query Router*
 
-\[
-I(q) = \arg\max_{c \in \mathcal{C}} P(c \mid q)
-\]
+I(q) = argmax_c P(c | q),  where c ∈ C
 
 **Why LLM-based classification?**  
 It offers semantic generalization, structured outputs, and zero training cost.
@@ -88,9 +80,7 @@ It offers semantic generalization, structured outputs, and zero training cost.
 
 ## 2️⃣ Adaptive Retrieval — *Dynamic k-NN Controller*
 
-\[
-k = f(I(q))
-\]
+k = f(I(q))   // number of retrieved chunks depends on intent
 
 | Intent | Chunk Size | k | Strategy |
 |------|-----------|---|----------|
@@ -101,11 +91,7 @@ k = f(I(q))
 
 ### HyDE
 
-\[
-\hat{a} = G(q, \emptyset)
-\]
-
-Retrieve using \( embed(\hat{a}) \).
+â = G(q, ∅)   // hypothetical answer generated without context
 
 ---
 
@@ -119,15 +105,12 @@ Retrieve using \( embed(\hat{a}) \).
 
 ## 4️⃣ Verification Judge — *NLI Entailment Engine*
 
-\[
-A \rightarrow \{c_1, c_2, ..., c_n\}
-\]
+A → { c1, c2, ..., cn }   // atomic claim decomposition
 
 Each claim checked via entailment:
 
-\[
-E(c_i, \mathcal{C}_k)
-\]
+E(ci, Ck) ∈ {entailed, neutral, contradicted}
+
 
 **Model:** Nemotron-3 Nano 30B
 
@@ -135,9 +118,7 @@ E(c_i, \mathcal{C}_k)
 
 ## 5️⃣ Self-Correction — *Constraint-Based Refinement*
 
-\[
-A_{t+1} = \arg\min_{\Delta} \|\Delta(A_t)\|
-\]
+A_{t+1} = argmin_Δ || Δ(A_t) ||
 
 Preserves verified claims while removing hallucinations.
 
@@ -147,13 +128,12 @@ Preserves verified claims while removing hallucinations.
 
 ## 6️⃣ Failure-Aware Abstention — *Threshold Gate*
 
-Hard Abstention:
+Hard Abstention if:
 
-\[
-\max \cos(\theta) < \tau \; (\tau \approx 0.65)
-\]
+max cosine_similarity < τ   (τ ≈ 0.65)
 
-Soft Abstention if <50% claims are entailed.
+
+Soft Abstention if <50% of claims are entailed.
 
 <div style="border-left: 4px solid #d73a49; padding-left: 12px;">
 <b>Abstention is a designed outcome, not a fallback.</b>
