@@ -29,7 +29,7 @@ This project proposes a **verification-first RAG architecture** that treats hall
 
 ---
 
-## 🧠 Core Contributions (What Makes This “Elite”)
+## 🧠 Core Contributions
 
 <div style="border-left: 4px solid #6f42c1; padding-left: 12px;">
 <b>Key Insight:</b><br>
