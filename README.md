@@ -88,7 +88,7 @@ flowchart TD
 ### 1. Clone the repository
 ```bash
 git clone https://github.com/Raunak-23/Self_Correcting_RAG.git
-cd <Self_Correcting_RAG>
+cd Self_Correcting_RAG
 ```
 
 ### 2. Create and activate a virtual environment
@@ -134,10 +134,10 @@ V(.)    = verification function
  
 The system executes:
 
-q → I(q) → R_{I(q)} → C_k → G(q, C_k) → V(claims, C_k)
-        ↳ Answer (if verified)
-        ↳ Correct (if salvageable)
-        ↳ Abstain (if unreliable)
+q → I(q) → R_{I(q)} → C_k → G(q, C_k) → V(claims, C_k) \n
+        ↳ Answer (if verified) \n
+        ↳ Correct (if salvageable) \n
+        ↳ Abstain (if unreliable) \n
 
 ---
 
