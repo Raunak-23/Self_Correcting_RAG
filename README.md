@@ -134,10 +134,12 @@ V(.)    = verification function
  
 The system executes:
 
-q → I(q) → R_{I(q)} → C_k → G(q, C_k) → V(claims, C_k) \n
-        ↳ Answer (if verified) \n
-        ↳ Correct (if salvageable) \n
-        ↳ Abstain (if unreliable) \n
+```text
+q → I(q) → R_{I(q)} → C_k → G(q, C_k) → V(claims, C_k)
+        ↳ Answer (if verified)
+        ↳ Correct (if salvageable)
+        ↳ Abstain (if unreliable)
+```
 
 ---
 
