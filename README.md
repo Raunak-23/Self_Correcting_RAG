@@ -66,14 +66,14 @@ If you are interested in **building LLM systems that know when they might be wro
 
 ```mermaid
 flowchart TD
-    Q[User Query q] --> I[Intent Classification I(q)]
-    I --> R[Adaptive Retrieval R_I(q)]
-    R --> C[Retrieved Context C_k]
+    Q[User Query q] --> I[Intent Classification]
+    I --> R[Adaptive Retrieval]
+    R --> C[Retrieved Context]
     C --> G[Initial RAG Generation]
-    G --> V[Verification & NLI Entailment]
+    G --> V[Verification and Entailment]
 
     V -->|Verified| A[Answer]
-    V -->|Partially Grounded| S[Self-Correction]
+    V -->|Partially Grounded| S[Self Correction]
     S --> V
 
     V -->|Low Confidence| T[Threshold Gate]
@@ -104,7 +104,14 @@ pip install -r requirements.txt
 ```
 
 ### 4. Set up API keys
-Create a .env file and add your API keys as per .env.example
+Create a .env file and add your API keys as per .env.example :
+```bash
+QDRANT_URL=your_qdrant_url_here
+QDRANT_API_KEY=your_qdrant_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
+GROQ_API_KEY=your_groq_api_key_here
+```
 
 ### 5. Run the system
 ```bash
@@ -112,6 +119,8 @@ python main.py
 ```
 This will execute the end-to-end pipeline:
 intent classification → adaptive retrieval → generation → verification → correction / abstention.
+
+---
 
 ## 🧩 System Overview (Formal Pipeline)
 
