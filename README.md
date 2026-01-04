@@ -124,6 +124,7 @@ intent classification → adaptive retrieval → generation → verification →
 
 ## 🧩 System Overview (Formal Pipeline)
 
+```text
 Let:
 q       = user query
 I(q)    = inferred intent
@@ -131,7 +132,8 @@ R_I(q)  = intent-specific retrieval policy
 C_k     = retrieved context (top-k chunks)
 G(.)    = generation function
 V(.)    = verification function
- 
+```
+
 The system executes:
 
 ```text
