@@ -1,0 +1,30 @@
+# Core Framework
+langchain>=0.2.0
+langchain-community
+langchain-core
+langchain-groq
+langchain-google-genai
+langchain-openai
+
+# Vector DB & Embeddings
+qdrant-client
+sentence-transformers
+transformers
+torch --index-url https://download.pytorch.org/whl/cpu # Use CPU-only for light local dev
+
+# Document Loading
+pypdf
+docx2txt
+
+# Evaluation & Metrics
+ragas                     # RAG evaluation metrics (faithfulness, precision, etc.)
+wandb                     # Weights & Biases free tier logging
+pandas
+scikit-learn
+pytest
+
+# Utilities
+python-dotenv
+pydantic>=2.0.0
+loguru
+tiktoken                  # Token counting for some retrievers
