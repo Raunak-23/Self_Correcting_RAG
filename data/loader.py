@@ -12,6 +12,8 @@ from langchain_groq import ChatGroq
 import logging
 from dotenv import load_dotenv
 from transformers import pipeline
+import json
+from pathlib import Path
 
 load_dotenv()  # Load API keys from .env
 
@@ -28,6 +30,9 @@ CHUNK_PROFILES = {
 
 TOKEN_ENCODING = "cl100k_base"  # Standard for OpenAI/modern models
 
+CACHE_DIR = "data/processed_chunks/classification_cache"
+Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
+
 def get_token_count(text: str) -> int:
     encoding = tiktoken.get_encoding(TOKEN_ENCODING)
     return len(encoding.encode(text))
@@ -35,15 +40,23 @@ def get_token_count(text: str) -> int:
 def generate_doc_id(content: str) -> str:
     return hashlib.md5(content.encode('utf-8')).hexdigest()
 
-def classify_doc_type(content: str, use_huggingface: bool = False) -> str:
+def classify_doc_type(content: str, filename: str, use_huggingface: bool = False) -> str:
     """
     Classifies document type using Groq LLM (default) or HuggingFace zero-shot classifier (fallback).
-    Prompt/templates engineered for zero-shot accuracy on custom labels.
+    Uses filename-based caching for readability.
     """
-    excerpt = content[:500]  # Token-safe sample to avoid context limits
+    # Sanitize filename for safe path (replace invalid chars)
+    safe_filename = "".join(c if c.isalnum() or c in ['.', '_'] else '_' for c in filename)
+    cache_path = f"{CACHE_DIR}/{safe_filename}.json"
+    
+    # Check for existing cache
+    if os.path.exists(cache_path):
+        with open(cache_path, 'r') as f:
+            return json.load(f)['type']
+    
+    excerpt = content[:500]  # Token-safe sample
     
     if not use_huggingface:
-        # Use available Groq model: llama-3.1-8b-instant (fast, aligns with intent classifier)
         llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0)
         prompt = ChatPromptTemplate.from_template(
             "Classify this document excerpt strictly as one type: "
@@ -55,30 +68,34 @@ def classify_doc_type(content: str, use_huggingface: bool = False) -> str:
         chain = prompt | llm
         response = chain.invoke({"excerpt": excerpt}).content.strip()
     else:
-        # HuggingFace fallback: DeBERTa-v3-small for zero-shot (CPU-friendly, ~200MB model)
         classifier = pipeline("zero-shot-classification", model="MoritzLaurer/deberta-v3-small-zeroshot-v1")
         labels = ["factual: lists facts, data, definitions, timelines",
                   "conceptual: explains ideas, comparisons, theories, processes",
                   "long_context: narratives, stories, detailed overviews, long descriptions"]
         result = classifier(excerpt, candidate_labels=labels, multi_label=False)
-        response = result['labels'][0].split(':')[0].strip()  # Extract top label
+        response = result['labels'][0].split(':')[0].strip()
     
     if response not in CHUNK_PROFILES:
-        response = "conceptual"  # Fallback for robustness
+        response = "conceptual"  # Fallback
+    
+    # Save to cache
+    with open(cache_path, 'w') as f:
+        json.dump({'type': response}, f)
+    
     return response
-
+    
 # In load_and_chunk_documents, call as: doc_type = classify_doc_type(doc_content)  
 # Or pass use_huggingface=True for local
 
 def load_single_document(file_path: str) -> List[Document]:
     """
-    Loads a single document based on its file extension.
-    Supports: .pdf, .docx, .txt, .md
+    Loads a single document and merges all pages into ONE Document object.
+    This enables whole-document classification while preserving source metadata.
     """
     ext = os.path.splitext(file_path)[1].lower()
     try:
         if ext == '.pdf':
-            loader = PyPDFLoader(file_path)
+            loader = PyPDFLoader(file_path)  # Default mode="page" gives per-page
         elif ext == '.docx':
             loader = Docx2txtLoader(file_path)
         elif ext == '.txt' or ext == '.md':
@@ -86,14 +103,27 @@ def load_single_document(file_path: str) -> List[Document]:
         else:
             logger.warning(f"Skipping unsupported file extension: {ext} for {file_path}")
             return []
-            
-        docs = loader.load()
-        # Initial metadata application
-        for doc in docs:
-            doc.metadata['source'] = file_path
-            doc.metadata['filename'] = os.path.basename(file_path)
-            doc.metadata['extension'] = ext
-        return docs
+        
+        # Load per-page docs first
+        page_docs = loader.load()
+        
+        if not page_docs:
+            return []
+        
+        # Merge all pages into single document content
+        full_content = "\n\n".join(doc.page_content for doc in page_docs)
+        
+        # Use metadata from first page (or enrich as needed)
+        base_metadata = page_docs[0].metadata.copy()
+        base_metadata.update({
+            'source': file_path,
+            'filename': os.path.basename(file_path),
+            'extension': ext,
+            'total_pages': len(page_docs)  # Bonus: track page count
+        })
+        
+        merged_doc = Document(page_content=full_content, metadata=base_metadata)
+        return [merged_doc]  # Return list with single merged Document
         
     except Exception as e:
         logger.error(f"Failed to load {file_path}: {str(e)}")
@@ -130,7 +160,7 @@ def load_and_chunk_documents(raw_docs_dir: str, dynamic_upload: bool = False) ->
         doc_content = original_doc.page_content
         doc_id = generate_doc_id(doc_content)
         time.sleep(2)  # Delay to avoid rate limits
-        doc_type = classify_doc_type(doc_content)  # Auto-filter type
+        doc_type = classify_doc_type(doc_content, original_doc.metadata['filename'])  # Auto-filter type
         logger.info(f"Classified {original_doc.metadata['filename']} as {doc_type}")
         
         # Apply only relevant profiles (primary + one fallback)
