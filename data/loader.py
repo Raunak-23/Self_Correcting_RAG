@@ -6,7 +6,13 @@ from typing import List, Optional, Dict
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
 import logging
+from dotenv import load_dotenv
+from transformers import pipeline
+
+load_dotenv()  # Load API keys from .env
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,13 +28,46 @@ CHUNK_PROFILES = {
 TOKEN_ENCODING = "cl100k_base"  # Standard for OpenAI/modern models
 
 def get_token_count(text: str) -> int:
-    """Returns accurate token count for a string."""
     encoding = tiktoken.get_encoding(TOKEN_ENCODING)
     return len(encoding.encode(text))
 
 def generate_doc_id(content: str) -> str:
-    """Generates a stable hash ID based on document content."""
     return hashlib.md5(content.encode('utf-8')).hexdigest()
+
+def classify_doc_type(content: str, use_huggingface: bool = False) -> str:
+    """
+    Classifies document type using Groq LLM (default) or HuggingFace zero-shot classifier (fallback).
+    Prompt/templates engineered for zero-shot accuracy on custom labels.
+    """
+    excerpt = content[:500]  # Token-safe sample to avoid context limits
+    
+    if not use_huggingface:
+        # Use available Groq model: llama-3.1-8b-instant (fast, aligns with intent classifier)
+        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0)
+        prompt = ChatPromptTemplate.from_template(
+            "Classify this document excerpt strictly as one type: "
+            "'factual' (lists facts, data, definitions, timelines), "
+            "'conceptual' (explains ideas, comparisons, theories, processes), or "
+            "'long_context' (narratives, stories, detailed overviews, long descriptions). "
+            "Output ONLY the type, nothing else.\n\nExcerpt: {excerpt}"
+        )
+        chain = prompt | llm
+        response = chain.invoke({"excerpt": excerpt}).content.strip()
+    else:
+        # HuggingFace fallback: DeBERTa-v3-small for zero-shot (CPU-friendly, ~200MB model)
+        classifier = pipeline("zero-shot-classification", model="MoritzLaurer/deberta-v3-small-zeroshot-v1")
+        labels = ["factual: lists facts, data, definitions, timelines",
+                  "conceptual: explains ideas, comparisons, theories, processes",
+                  "long_context: narratives, stories, detailed overviews, long descriptions"]
+        result = classifier(excerpt, candidate_labels=labels, multi_label=False)
+        response = result['labels'][0].split(':')[0].strip()  # Extract top label
+    
+    if response not in CHUNK_PROFILES:
+        response = "conceptual"  # Fallback for robustness
+    return response
+
+# In load_and_chunk_documents, call as: doc_type = classify_doc_type(doc_content)  
+# Or pass use_huggingface=True for local
 
 def load_single_document(file_path: str) -> List[Document]:
     """
@@ -59,10 +98,10 @@ def load_single_document(file_path: str) -> List[Document]:
         logger.error(f"Failed to load {file_path}: {str(e)}")
         return []
 
-def load_and_chunk_documents(raw_docs_dir: str) -> List[Document]:
+def load_and_chunk_documents(raw_docs_dir: str, dynamic_upload: bool = False) -> List[Document]:
     """
-    Traverses the directory, loads documents, and creates multiple chunk variations 
-    (factual, conceptual, long_context) for each document.
+    Loads docs, classifies type, applies targeted chunk profiles, adds metadata.
+    If dynamic_upload=True (e.g., from Streamlit), process only new files.
     """
     all_chunks = []
     
@@ -70,35 +109,41 @@ def load_and_chunk_documents(raw_docs_dir: str) -> List[Document]:
         logger.error(f"Directory path does not exist: {raw_docs_dir}")
         return []
 
-    # 1. Load all raw documents first
+    # Load raw documents (filter for new if dynamic)
     raw_documents = []
     for root, _, files in os.walk(raw_docs_dir):
         for file in files:
             if file.lower().endswith(('.pdf', '.docx', '.txt', '.md')):
                 file_path = os.path.join(root, file)
+                if dynamic_upload and os.path.exists(f"processed_chunks/{file}.json"):  # Skip processed
+                    continue
                 logger.info(f"Processing: {file_path}")
                 loaded_docs = load_single_document(file_path)
                 raw_documents.extend(loaded_docs)
     
     if not raw_documents:
-        logger.warning("No valid documents found to process.")
         return []
 
-    logger.info(f"Total raw documents loaded: {len(raw_documents)}")
-
-    # 2. Apply Adaptive Chunking
+    # Apply Adaptive Chunking with Filtering
     for original_doc in raw_documents:
-        doc_id = generate_doc_id(original_doc.page_content)
+        doc_content = original_doc.page_content
+        doc_id = generate_doc_id(doc_content)
+        doc_type = classify_doc_type(doc_content)  # Auto-filter type
+        logger.info(f"Classified {original_doc.metadata['filename']} as {doc_type}")
         
-        for profile_name, settings in CHUNK_PROFILES.items():
+        # Apply only relevant profiles (primary + one fallback)
+        profiles_to_apply = [doc_type, "conceptual"] if doc_type != "conceptual" else [doc_type]
+        
+        for profile_name in profiles_to_apply:
+            settings = CHUNK_PROFILES[profile_name]
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=settings["chunk_size"],
                 chunk_overlap=settings["chunk_overlap"],
                 separators=["\n\n", "\n", " ", ""],
-                length_function=len
+                length_function=get_token_count  # Token-based for accuracy
             )
             
-            splits = splitter.split_text(original_doc.page_content)
+            splits = splitter.split_text(doc_content)
             
             for i, split_content in enumerate(splits):
                 chunk_metadata = original_doc.metadata.copy()
@@ -107,34 +152,84 @@ def load_and_chunk_documents(raw_docs_dir: str) -> List[Document]:
                     "chunk_id": i,
                     "chunk_type": profile_name,
                     "tokens": get_token_count(split_content),
-                    "profile_chunk_size": settings["chunk_size"]
+                    "profile_chunk_size": settings["chunk_size"],
+                    "doc_primary_type": doc_type  # For advanced filtering
                 })
                 
-                chunk_doc = Document(
-                    page_content=split_content,
-                    metadata=chunk_metadata
-                )
+                chunk_doc = Document(page_content=split_content, metadata=chunk_metadata)
                 all_chunks.append(chunk_doc)
                 
-    logger.info(f"Generated {len(all_chunks)} total chunks across {len(CHUNK_PROFILES)} profiles.")
-    
+    logger.info(f"Generated {len(all_chunks)} chunks.")
     return all_chunks
 
 if __name__ == "__main__":
-    # Test execution
-    import sys
-    test_dir = sys.argv[1] if len(sys.argv) > 1 else "../data/raw_docs"
-    
-    print(f"Testing adaptive loader on: {test_dir}")
-    chunks = load_and_chunk_documents(test_dir)
-    
-    if chunks:
-        print(f"\nExample Metadata (Factual):")
-        factual = next((c for c in chunks if c.metadata['chunk_type'] == 'factual'), None)
-        if factual:
-            print(factual.metadata)
-            
-        print(f"\nExample Metadata (Long Context):")
-        long_ctx = next((c for c in chunks if c.metadata['chunk_type'] == 'long_context'), None)
-        if long_ctx:
-            print(long_ctx.metadata)
+    import argparse
+    from collections import Counter
+
+    parser = argparse.ArgumentParser(description="Test the adaptive document loader.")
+    parser.add_argument(
+        "raw_docs_dir",
+        nargs="?",
+        default="data/raw_docs",  # Adjust if your folder is named differently (e.g., raw_data)
+        help="Path to the raw documents directory (default: data/raw_docs)"
+    )
+    parser.add_argument(
+        "--use-hf",
+        action="store_true",
+        help="Force use HuggingFace zero-shot classifier instead of Groq (for offline/no-API testing)"
+    )
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Simulate dynamic upload mode (skip already processed files)"
+    )
+    args = parser.parse_args()
+
+    print(f"Testing loader on directory: {args.raw_docs_dir}")
+    print(f"Using {'HuggingFace' if args.use_hf else 'Groq LLM'} for classification")
+    print(f"Dynamic mode: {args.dynamic}\n")
+
+    # Patch classify_doc_type temporarily if forcing HF
+    if args.use_hf:
+        original_classify = classify_doc_type
+        def classify_doc_type(content: str, use_huggingface: bool = False) -> str:
+            return original_classify(content, use_huggingface=True)
+
+    chunks = load_and_chunk_documents(args.raw_docs_dir, dynamic_upload=args.dynamic)
+
+    if not chunks:
+        print("No chunks generated — check directory path and file formats!")
+        exit()
+
+    print(f"\nSuccessfully generated {len(chunks)} chunks from {len(set(c.metadata['filename'] for c in chunks))} documents.\n")
+
+    # Summary statistics
+    doc_types = Counter(c.metadata['doc_primary_type'] for c in chunks)
+    chunk_types = Counter(c.metadata['chunk_type'] for c in chunks)
+    token_stats = [c.metadata['tokens'] for c in chunks]
+
+    print("Document Primary Type Distribution:")
+    for typ, count in doc_types.items():
+        print(f"  - {typ}: {count // len(CHUNK_PROFILES)} documents")  # Approx, since multiple profiles
+
+    print("\nChunk Type Distribution:")
+    for typ, count in chunk_types.items():
+        print(f"  - {typ}: {count} chunks")
+
+    print(f"\nToken Statistics:")
+    print(f"  - Average tokens per chunk: {sum(token_stats)/len(token_stats):.1f}")
+    print(f"  - Min/Max tokens: {min(token_stats)} / {max(token_stats)}")
+
+    # Show a few example chunks
+    print("\nExample Chunks:")
+    seen_files = set()
+    for chunk in chunks[:10]:  # Show up to 10 diverse examples
+        filename = chunk.metadata['filename']
+        if filename in seen_files:
+            continue
+        seen_files.add(filename)
+        print(f"\n--- {filename} ---")
+        print(f"Primary Type: {chunk.metadata['doc_primary_type']}")
+        print(f"Chunk Type: {chunk.metadata['chunk_type']} (size {chunk.metadata['profile_chunk_size']})")
+        print(f"Tokens: {chunk.metadata['tokens']}")
+        print(f"Preview: {chunk.page_content[:300]}...\n")
