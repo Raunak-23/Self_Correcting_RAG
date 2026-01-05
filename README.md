@@ -14,9 +14,9 @@
 
 Classic RAG pipelines assume:
 
-\[
+$$
 \text{High Similarity} \Rightarrow \text{High Truth}
-\]
+$$
 
 This assumption is **false**.
 

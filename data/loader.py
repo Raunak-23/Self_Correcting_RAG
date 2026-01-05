@@ -1,4 +1,5 @@
 import os
+import time
 import glob
 import hashlib
 import tiktoken
@@ -128,6 +129,7 @@ def load_and_chunk_documents(raw_docs_dir: str, dynamic_upload: bool = False) ->
     for original_doc in raw_documents:
         doc_content = original_doc.page_content
         doc_id = generate_doc_id(doc_content)
+        time.sleep(2)  # Delay to avoid rate limits
         doc_type = classify_doc_type(doc_content)  # Auto-filter type
         logger.info(f"Classified {original_doc.metadata['filename']} as {doc_type}")
         
