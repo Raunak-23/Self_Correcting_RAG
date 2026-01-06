@@ -54,29 +54,44 @@ def classify_doc_type(content: str, filename: str, use_huggingface: bool = False
         with open(cache_path, 'r') as f:
             return json.load(f)['type']
     
-    excerpt = content[:500]  # Token-safe sample
+    total_len = len(content)
+    samples = [
+        content[:500],                                      # Intro/abstract
+        content[total_len//2 - 250: total_len//2 + 250],     # Middle section
+        content[-500:]                                      # Conclusion/references
+    ]
     
-    if not use_huggingface:
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0)
-        prompt = ChatPromptTemplate.from_template(
-            "Classify this document excerpt strictly as one type: "
-            "'factual' (lists facts, data, definitions, timelines), "
-            "'conceptual' (explains ideas, comparisons, theories, processes), or "
-            "'long_context' (narratives, stories, detailed overviews, long descriptions). "
-            "Output ONLY the type, nothing else.\n\nExcerpt: {excerpt}"
-        )
-        chain = prompt | llm
-        response = chain.invoke({"excerpt": excerpt}).content.strip()
+    votes = []
+    for excerpt in samples:
+        if len(excerpt.strip()) < 50:  # Skip empty samples
+            continue
+        if not use_huggingface:
+            llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.0)
+            prompt = ChatPromptTemplate.from_template(
+                "Classify this document excerpt strictly as one type: "
+                "'factual' (lists facts, data, definitions, timelines), "
+                "'conceptual' (explains ideas, comparisons, theories, processes), or "
+                "'long_context' (narratives, stories, detailed overviews, long descriptions). "
+                "Output ONLY the type, nothing else.\n\nExcerpt: {excerpt}"
+            )
+            chain = prompt | llm
+            response = chain.invoke({"excerpt": excerpt}).content.strip()
+        else:
+            classifier = pipeline("zero-shot-classification", model="MoritzLaurer/deberta-v3-small-zeroshot-v1")
+            labels = ["factual: lists facts, data, definitions, timelines",
+                    "conceptual: explains ideas, comparisons, theories, processes",
+                    "long_context: narratives, stories, detailed overviews, long descriptions"]
+            result = classifier(excerpt, candidate_labels=labels, multi_label=False)
+            response = result['labels'][0].split(':')[0].strip()
+        if response in CHUNK_PROFILES:
+            votes.append(response)
+        
+    # Majority vote with fallback
+    if votes:
+        from collections import Counter
+        response = Counter(votes).most_common(1)[0][0]
     else:
-        classifier = pipeline("zero-shot-classification", model="MoritzLaurer/deberta-v3-small-zeroshot-v1")
-        labels = ["factual: lists facts, data, definitions, timelines",
-                  "conceptual: explains ideas, comparisons, theories, processes",
-                  "long_context: narratives, stories, detailed overviews, long descriptions"]
-        result = classifier(excerpt, candidate_labels=labels, multi_label=False)
-        response = result['labels'][0].split(':')[0].strip()
-    
-    if response not in CHUNK_PROFILES:
-        response = "conceptual"  # Fallback
+        response = "conceptual"
     
     # Save to cache
     with open(cache_path, 'w') as f:
