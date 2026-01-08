@@ -5,6 +5,7 @@ langchain-core
 langchain-groq
 langchain-google-genai
 langchain-openai
+langchain-huggingface
 
 # Vector DB & Embeddings
 qdrant-client
