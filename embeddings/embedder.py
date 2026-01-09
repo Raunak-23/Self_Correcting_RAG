@@ -22,7 +22,7 @@ class Embedder:
     Automatically detects device (GPU if available) for efficiency.
     """
     
-    def __init__(self, model_name: str = DEFAULT_MODEL_NAME, batch_size: int = 32, normalize: bool = True):
+    def __init__(self, model_name: str = DEFAULT_MODEL_NAME, batch_size: int = 64, normalize: bool = True):
         """
         Initializes the embedder.
         
