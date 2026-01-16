@@ -122,6 +122,14 @@ class IntentClassifier:
                     "query": "Summarize climate change impacts and suggest solutions.",
                     "output": '{"intent": "ambiguous", "confidence": 0.60, "reasoning": "Mix of summarization and procedural (solutions); multi-class, requires expansion.", "needs_expansion": true}',
                 },
+                {
+                    "query": "What is the melting point of Tungsten?",
+                    "output": '{"intent": "factual", "confidence": 0.98, "reasoning": "Single atomic fact lookup.", "needs_expansion": false}',
+                },
+                {
+                    "query": "Tell me about Einstein's life and theories.",
+                    "output": '{"intent": "ambiguous", "confidence": 0.90, "reasoning": "Compound query combining biography (summarization) and physics (conceptual). Requires decomposition.", "needs_expansion": true}',
+                },
             ],
         )
         
@@ -129,7 +137,9 @@ class IntentClassifier:
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", 
-                 "You are an expert query intent classifier for a RAG system. "
+                 "You are a SOTA Intent Classifier. Your goal is to route queries to the best retrieval strategy.\n"
+                 "CORE RULE: If a query has multiple parts (e.g., 'X and Y'), targets multiple timeframes, "
+                 "or requires a mix of biography and technical theory, it is COMPOUND.\n\n"
                  "Classify the query into EXACTLY ONE of: "
                  "factual (precise facts, entities, definitions, who/what/when/where), "
                  "conceptual (explanations, theories, how/why ideas work, relationships), "
@@ -139,9 +149,11 @@ class IntentClassifier:
                  "ambiguous (unclear, multi-faceted, multi-step, or open-ended requiring clarification). "
                  "For multi-step or hybrid queries, choose the dominant intent or classify as ambiguous if no clear primary. "
                  "Set confidence <0.7 for uncertain/hybrid cases. "
-                 "Set needs_expansion=true if ambiguous or confidence <0.7 for downstream query decomposition. "
+                 "Set needs_expansion=true if ambiguous, procedural, conceptual, summarization or confidence <0.7 for downstream query decomposition. "
                  "Output ONLY the JSON as per the format instructions. "
                  "Provide confidence (0-1 based on clarity/match) and brief reasoning."
+                 "STRICT: If a query is compound (like 'Einstein's life AND theories'), you MUST classify it as 'ambiguous' "
+                 "and set needs_expansion=true to trigger decomposition."
                 ),
                 self.few_shot_prompt,
                 ("human", "{query}"),
